@@ -9,8 +9,8 @@ from config import openai_apikey
 from config import google_apikey
 
 # AO
-import ao_pyth as ao
-import ao_core as ao # private package, to run our code locally, useful for advanced debugging; ao_pyth is enough for most use cases
+import ao_pyth as ao # $ pip install ao_pyth - https://pypi.org/project/ao-pyth/
+# import ao_core as ao # private package, to run our code locally, useful for advanced debugging; ao_pyth is enough for most use cases
 from config import ao_apikey
 
 
