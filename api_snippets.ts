@@ -19,7 +19,7 @@ const set_agent_arch = {
     })
   };
   
-  fetch('https://api.aolabs.ai/prod/kennel', set_agent_arch)
+  fetch('https://api.aolabs.ai/v0dev/kennel', set_agent_arch)
     .then(res => res.json())
     .then(res => console.log(res))
     .catch(err => console.error(err));
@@ -48,7 +48,7 @@ const train_agent = {
     })
   };
   
-  fetch('https://api.aolabs.ai/prod/kennel/agent', train_agent)
+  fetch('https://api.aolabs.ai/v0dev/kennel/agent', train_agent)
     .then(res => res.json())
     .then(res => console.log(res))
     .catch(err => console.error(err));
@@ -76,7 +76,7 @@ const test_agent = {
     })
   };
   
-  fetch('https://api.aolabs.ai/prod/kennel/agent', test_agent)
+  fetch('https://api.aolabs.ai/v0dev/kennel/agent', test_agent)
     .then(res => res.json())
     .then(res => console.log(res))
     .catch(err => console.error(err));
