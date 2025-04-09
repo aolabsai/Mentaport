@@ -6,6 +6,7 @@ import requests
 import numpy as np
 from openai import OpenAI
 from config import openai_apikey
+from config import google_apikey
 
 # AO
 import ao_pyth as ao
@@ -29,7 +30,6 @@ def llm_call(input_message): #llm call method
 def get_youtube_data(video_id="dQw4w9WgXcQ"):
     # constructed using grok: https://x.com/i/grok/share/W2HgoXmN638QUOJNKaqtnKiS2
     # refer to that if unsure how to generate your own YT API key
-    google_apikey = "AIzaSyDj7CVAywnsHlgqt-FzdvfF1sI3MnXspdM"
     url = f"https://www.googleapis.com/youtube/v3/videos?part=snippet&id={video_id}&key={google_apikey}"
 
     response = requests.get(url)
@@ -41,9 +41,18 @@ def get_youtube_data(video_id="dQw4w9WgXcQ"):
     return description, all_data
 
 
+def convert_to_binary(input_to_agent_scaled, scale=10):
+    input_to_agent = []
+    for i in input_to_agent_scaled:
+        likelihood = np.zeros(scale, dtype=int)
+        likelihood[0:i] = 1
+        input_to_agent += likelihood.tolist()
+    return input_to_agent
+
+
 # Initialize AO agent architecture with X input neurons, X hidden neurons (by default), 5 output neurons. 
 
-# Input consists of 3 features (all binary): -- we should think of more
+# Input consists of 3 features, each given on a likelihood scale of 0-10):
 # 1. if cross platform --> video title or description mentions TikTok or IG
 # 2. if compilation --> mentions compilation or similar words
 # 3. if ad --> includes affiliate links or others to sketchy e-commerce sites
@@ -51,7 +60,7 @@ def get_youtube_data(video_id="dQw4w9WgXcQ"):
 # -- come up with more input types/channels of data!
 #
 # The 5 output neurons correspond to the likelihood of infringement (scale 1-5).
-arch = ao.Arch(arch_i="[1, 1, 1]", arch_z="[5]", api_key=ao_apikey, kennel_id="Mentaport_demo") 
+arch = ao.Arch(arch_i="[10, 10, 10]", arch_z="[5]", api_key=ao_apikey, kennel_id="Mentaport_demo") 
 
 
 # Create an agent with the given architecture
@@ -62,13 +71,16 @@ agent.api_reset_compatibility = True # to enable similar behavior in local core 
 # Setting a baseline by pre-training example patterns that are known to be fraudulent. 
 # -> Likelihood of fraud (scale 1-5)
 training_data = [
-    ([1, 1, 1], [1, 1, 1, 1, 1]),     # Highest fraud likelihood
-    ([1, 1, 0], [1, 1, 1, 0, 0]),
-    ([1, 0, 0], [1, 0, 0, 0, 0]),
+    ([10, 10, 10], [1, 1, 1, 1, 1]),     # Highest fraud likelihood
+    ([8, 4, 0], [1, 1, 1, 0, 0]),
+    ([10, 0, 0], [1, 1, 0, 0, 0]),
+    ([0, 4, 10], [1, 1, 0, 0, 0]),
     ([0, 0, 0], [0, 0, 0, 0, 0]),
+
 ]
-###Uncomment to train the agent on baseline
+##### Optional - uncomment to train the agent on baseline (if the agent has no prior training, it would output random; if it only has 1 label/training event, it can only ever output that until trained on more examples)
 for inp, label in training_data:
+    inp = convert_to_binary(inp, scale=10)
     agent.next_state(INPUT=inp, LABEL=label, unsequenced=True)  # Reset states are added automatically if unsequenced=True and when agent.api_reset_compatibility is True
 
 
@@ -77,35 +89,48 @@ for inp, label in training_data:
 yt_description = get_youtube_data("SUBk89F3giM")
 
 # Extracting features for input (using an LLM here - we can use other APIs)
-input_to_agent = ast.literal_eval(llm_call(f"""I am attaching a youtube video to this chat. Fill out this list with 1 OR 0 of length 3 then return the list only. Format: 
-#          [mentions non-youtube social media platform like TikTok or instagram, seems like a compilation of content, seems like an ad] {yt_description} 
+input_to_agent_scaled = ast.literal_eval(llm_call(f"""
+Analyze the following YouTube description: {yt_description}.
+
+Provide a list of three numbers (1-10) representing: 1) the likelihood the content is re-posted from a cross-platform source, 2) the likelihood the content is a compilation of other content, 3) the likelihood the content is an advertisement. Base your ratings on the text provided, considering keywords, phrasing, and context. Return only the three numbers, no explanation."
                        """))
-print("LLM response: ", input_to_agent)
-print(type(input_to_agent))
+print("LLM response: ", input_to_agent_scaled)
+print(type(input_to_agent_scaled))
 
 ## Simple manual feature extraction examples
 # tiktok_mention = [1] if "TikTok" in yt_description else [0]
 # compilation = [1] if "compilation" in yt_description else [0]
 # print(tiktok_mention)
 
+# converting input to binary
+input_to_agent = convert_to_binary(input_to_agent_scaled, scale=10)
 
-# Predicting the likelihood of infringement based on the input
+
+# Predicting the likelihood of infringement based on the binary input
 agent_response = agent.next_state(input_to_agent, unsequenced=True)
-print("agent response: ", agent_response)
-ones = sum(agent_response)
-print("Predicted likelihood of infringement: ", ones / len(agent_response) * 100, "%")
+print("Agent raw binary response: ", agent_response)
+print("Predicted likelihood of infringement: ", sum(agent_response) / len(agent_response) * 100, "%")
 
 
 # Closing the Learning Loop - passing feedback to the system to drive learning
 res = input("Closing the Learning Loop-- was this input-pattern actually infringement (Y or N)?  ")
 if res == "Y":
-    agent.next_state(input_to_agent, [1, 1, 1, 1, 1], unsequenced=True)
+    agent.next_state(input_to_agent, LABEL=[1, 1, 1, 1, 1], unsequenced=True)
 else:
-    agent.next_state(input_to_agent, [0, 0, 0, 0, 0], unsequenced=True)
+    agent.next_state(input_to_agent, LABEL=[0, 0, 0, 0, 0], unsequenced=True)
 
 
 # To verify the learning, predict infringement again on the SAME input-pattern
 agent_response = agent.next_state(input_to_agent, unsequenced=True)
-print("agent response: ", agent_response)
-ones = sum(agent_response)
-print("AFTER LEARNING, predicted likelihood of infringement: ", ones / len(agent_response) * 100, "%")
+print("Agent raw binary response: ", agent_response)
+print("AFTER LEARNING, predicted likelihood of infringement: ", sum(agent_response) / len(agent_response) * 100, "%")
+
+
+
+# Testing with arbitrary inference calls (or include a LABEL argument to train)
+agent_response = agent.next_state(convert_to_binary([0, 10, 10]), unsequenced=True) # try other input patterns
+print("Agent raw binary response: ", agent_response)
+print("AFTER LEARNING, predicted likelihood of infringement: ", sum(agent_response) / len(agent_response) * 100, "%")
+
+## the ability of the agent to generalize depends on how often you train it
+## you can check the agent.state to see how much it has been called into action
